@@ -55,13 +55,32 @@ module I18n
   module Base
     # Gets I18n configuration object.
     def config
-      Thread.current.thread_variable_get(:i18n_config) ||
-        Thread.current.thread_variable_set(:i18n_config, I18n::Config.new)
+      if Fiber.respond_to?(:[])
+        current = Fiber[:i18n_config]
+
+        if current.nil?
+          current = I18n::Config.new
+          Fiber[:i18n_config] = current
+        elsif current.respond_to?(:owned_by?) && !current.owned_by?(Fiber.current)
+          current = current.dup
+          Fiber[:i18n_config] = current
+        end
+
+        current
+      else
+        Thread.current.thread_variable_get(:i18n_config) ||
+          Thread.current.thread_variable_set(:i18n_config, I18n::Config.new)
+      end
     end
 
     # Sets I18n configuration object.
     def config=(value)
-      Thread.current.thread_variable_set(:i18n_config, value)
+      if Fiber.respond_to?(:[])
+        Fiber[:i18n_config] = value
+        value.owner = Fiber.current if value.respond_to?(:owner=)
+      else
+        Thread.current.thread_variable_set(:i18n_config, value)
+      end
     end
 
     # Write methods which delegates to the configuration object

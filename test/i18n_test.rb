@@ -56,10 +56,14 @@ class I18nTest < I18n::TestCase
     assert_equal I18n.default_locale, I18n.locale
   end
 
-  test "sets the current locale to Thread.current" do
+  test "sets the current locale to Thread.current or Fiber local" do
     assert_nothing_raised { I18n.locale = 'de' }
     assert_equal :de, I18n.locale
-    assert_equal :de, Thread.current.thread_variable_get(:i18n_config).locale
+    if Fiber.respond_to?(:[])
+      assert_equal :de, Fiber[:i18n_config].locale
+    else
+      assert_equal :de, Thread.current.thread_variable_get(:i18n_config).locale
+    end
     I18n.locale = :en
   end
 
@@ -80,7 +84,11 @@ class I18nTest < I18n::TestCase
     begin
       I18n.config = self
       assert_equal self, I18n.config
-      assert_equal self, Thread.current.thread_variable_get(:i18n_config)
+      if Fiber.respond_to?(:[])
+        assert_equal self, Fiber[:i18n_config]
+      else
+        assert_equal self, Thread.current.thread_variable_get(:i18n_config)
+      end
     ensure
       I18n.config = ::I18n::Config.new
     end
@@ -560,5 +568,29 @@ class I18nTest < I18n::TestCase
     end.resume
 
     assert_equal :en, fiber_locale
+  end
+
+  test "I18n.locale is isolated between concurrent Fibers" do
+  skip "Fiber storage requires Ruby 3.2+" unless Fiber.respond_to?(:[])
+    I18n.available_locales = [:en, :ja]
+    I18n.default_locale = :en
+    I18n.locale = :en
+
+    fiber_ja = Fiber.new do
+      I18n.locale = :ja
+      Fiber.yield I18n.locale
+      I18n.locale
+    end
+
+    fiber_en = Fiber.new do
+      I18n.locale = :en
+      Fiber.yield I18n.locale
+      I18n.locale
+    end
+
+    assert_equal :ja, fiber_ja.resume
+    assert_equal :en, fiber_en.resume
+    assert_equal :ja, fiber_ja.resume
+    assert_equal :en, fiber_en.resume
   end
 end
